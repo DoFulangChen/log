@@ -21,7 +21,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/mmc/mmc.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/mmc/slot-gpio.h>
 #include <linux/interrupt.h>
 
@@ -238,6 +237,9 @@ static void davinci_fifo_data_trans(struct mmc_davinci_host *host,
 		n = host->buffer_bytes_left;
 	host->buffer_bytes_left -= n;
 	host->bytes_left -= n;
+
+	if (n > sgm->length)
+		n = sgm->length;
 
 	/* NOTE:  we never transfer more than rw_threshold bytes
 	 * to/from the fifo here; there's no I/O overlap.
@@ -1189,7 +1191,6 @@ static int mmc_davinci_parse_pdata(struct mmc_host *mmc)
 
 static int davinci_mmcsd_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *match;
 	struct mmc_davinci_host *host = NULL;
 	struct mmc_host *mmc = NULL;
 	struct resource *r, *mem = NULL;
@@ -1235,9 +1236,8 @@ static int davinci_mmcsd_probe(struct platform_device *pdev)
 
 	host->mmc_input_clk = clk_get_rate(host->clk);
 
-	match = of_match_device(davinci_mmc_dt_ids, &pdev->dev);
-	if (match) {
-		pdev->id_entry = match->data;
+	pdev->id_entry = of_device_get_match_data(&pdev->dev);
+	if (pdev->id_entry) {
 		ret = mmc_of_parse(mmc);
 		if (ret) {
 			dev_err_probe(&pdev->dev, ret,
@@ -1259,7 +1259,7 @@ static int davinci_mmcsd_probe(struct platform_device *pdev)
 
 	host->use_dma = use_dma;
 	host->mmc_irq = irq;
-	host->sdio_irq = platform_get_irq(pdev, 1);
+	host->sdio_irq = platform_get_irq_optional(pdev, 1);
 
 	if (host->use_dma) {
 		ret = davinci_acquire_dma_channels(host);

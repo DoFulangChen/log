@@ -15,7 +15,7 @@
 #include <asm/pci_clp.h>
 #include <asm/pci_io.h>
 
-#include <linux/vfio_pci_core.h>
+#include "vfio_pci_priv.h"
 
 /*
  * Add the Base PCI Function information to the device info region.
@@ -141,60 +141,27 @@ int vfio_pci_info_zdev_add_caps(struct vfio_pci_core_device *vdev,
 	return ret;
 }
 
-static int vfio_pci_zdev_group_notifier(struct notifier_block *nb,
-					unsigned long action, void *data)
-{
-	struct zpci_dev *zdev = container_of(nb, struct zpci_dev,
-					     kvm_group_nb);
-
-	if (action == VFIO_GROUP_NOTIFY_SET_KVM && zpci_kvm_hook.kvm_register) {
-		if (data) {
-			if (zpci_kvm_hook.kvm_register(zdev, data))
-				return NOTIFY_BAD;
-		}
-	}
-
-	return NOTIFY_OK;
-}
-
 int vfio_pci_zdev_open_device(struct vfio_pci_core_device *vdev)
 {
 	struct zpci_dev *zdev = to_zpci(vdev->pdev);
-	unsigned long events = VFIO_GROUP_NOTIFY_SET_KVM;
-	int ret;
 
 	if (!zdev)
 		return -ENODEV;
 
-	/*
-	 * Jammy-specific: backporting upstream commit 421cfe6596f6cb would
-	 * require a large number of pre-req series to also be applied,
-	 * affecting vfio across all platforms.
-	 * Instead implement a vfio KVM group notifier here which only
-	 * affects vfio-pci-zdev.  Rather than relying on the kvm pointer
-	 * being provided in the vdev, get it from the notifier.  Sice we know
-	 * the kvm will already be set, we can then immediately unregister the
-	 * notifier.
-	 */
-	zdev->kvm_group_nb.notifier_call = vfio_pci_zdev_group_notifier;
-	ret = vfio_register_notifier(&vdev->pdev->dev, VFIO_GROUP_NOTIFY,
-				     &events, &zdev->kvm_group_nb);
-	if (ret != 0) {
-		pr_warn("vfio_register_notifier for group failed: %d\n", ret);
-		return ret;
-	}
+	if (!vdev->vdev.kvm)
+		return 0;
 
-	vfio_unregister_notifier(&vdev->pdev->dev, VFIO_GROUP_NOTIFY,
-				 &zdev->kvm_group_nb);
+	if (zpci_kvm_hook.kvm_register)
+		return zpci_kvm_hook.kvm_register(zdev, vdev->vdev.kvm);
 
-	return 0;
+	return -ENOENT;
 }
 
 void vfio_pci_zdev_close_device(struct vfio_pci_core_device *vdev)
 {
 	struct zpci_dev *zdev = to_zpci(vdev->pdev);
 
-	if (!zdev || !zdev->kzdev)
+	if (!zdev || !vdev->vdev.kvm)
 		return;
 
 	if (zpci_kvm_hook.kvm_unregister)

@@ -30,11 +30,31 @@
  * macro, which uses the provided callbacks for both runtime PM and system
  * sleep, while DEFINE_RUNTIME_DEV_PM_OPS() uses pm_runtime_force_suspend()
  * and pm_runtime_force_resume() for its system sleep callbacks.
+ *
+ * If the underlying dev_pm_ops struct symbol has to be exported, use
+ * EXPORT_RUNTIME_DEV_PM_OPS() or EXPORT_GPL_RUNTIME_DEV_PM_OPS() instead.
  */
 #define DEFINE_RUNTIME_DEV_PM_OPS(name, suspend_fn, resume_fn, idle_fn) \
 	_DEFINE_DEV_PM_OPS(name, pm_runtime_force_suspend, \
 			   pm_runtime_force_resume, suspend_fn, \
 			   resume_fn, idle_fn)
+
+#define EXPORT_RUNTIME_DEV_PM_OPS(name, suspend_fn, resume_fn, idle_fn) \
+	EXPORT_DEV_PM_OPS(name) = { \
+		RUNTIME_PM_OPS(suspend_fn, resume_fn, idle_fn) \
+	}
+#define EXPORT_GPL_RUNTIME_DEV_PM_OPS(name, suspend_fn, resume_fn, idle_fn) \
+	EXPORT_GPL_DEV_PM_OPS(name) = { \
+		RUNTIME_PM_OPS(suspend_fn, resume_fn, idle_fn) \
+	}
+#define EXPORT_NS_RUNTIME_DEV_PM_OPS(name, suspend_fn, resume_fn, idle_fn, ns) \
+	EXPORT_NS_DEV_PM_OPS(name, ns) = { \
+		RUNTIME_PM_OPS(suspend_fn, resume_fn, idle_fn) \
+	}
+#define EXPORT_NS_GPL_RUNTIME_DEV_PM_OPS(name, suspend_fn, resume_fn, idle_fn, ns) \
+	EXPORT_NS_GPL_DEV_PM_OPS(name, ns) = { \
+		RUNTIME_PM_OPS(suspend_fn, resume_fn, idle_fn) \
+	}
 
 #ifdef CONFIG_PM
 extern struct workqueue_struct *pm_wq;
@@ -52,7 +72,8 @@ extern int pm_runtime_force_resume(struct device *dev);
 extern int __pm_runtime_idle(struct device *dev, int rpmflags);
 extern int __pm_runtime_suspend(struct device *dev, int rpmflags);
 extern int __pm_runtime_resume(struct device *dev, int rpmflags);
-extern int pm_runtime_get_if_active(struct device *dev, bool ign_usage_count);
+extern int pm_runtime_get_if_active(struct device *dev);
+extern int pm_runtime_get_if_in_use(struct device *dev);
 extern int pm_schedule_suspend(struct device *dev, unsigned int delay);
 extern int __pm_runtime_set_status(struct device *dev, unsigned int status);
 extern int pm_runtime_barrier(struct device *dev);
@@ -65,8 +86,6 @@ extern void pm_runtime_irq_safe(struct device *dev);
 extern void __pm_runtime_use_autosuspend(struct device *dev, bool use);
 extern void pm_runtime_set_autosuspend_delay(struct device *dev, int delay);
 extern u64 pm_runtime_autosuspend_expiration(struct device *dev);
-extern void pm_runtime_update_max_time_suspended(struct device *dev,
-						 s64 delta_ns);
 extern void pm_runtime_set_memalloc_noio(struct device *dev, bool enable);
 extern void pm_runtime_get_suppliers(struct device *dev);
 extern void pm_runtime_put_suppliers(struct device *dev);
@@ -75,18 +94,6 @@ extern void pm_runtime_drop_link(struct device_link *link);
 extern void pm_runtime_release_supplier(struct device_link *link);
 
 extern int devm_pm_runtime_enable(struct device *dev);
-
-/**
- * pm_runtime_get_if_in_use - Conditionally bump up runtime PM usage counter.
- * @dev: Target device.
- *
- * Increment the runtime PM usage counter of @dev if its runtime PM status is
- * %RPM_ACTIVE and its runtime PM usage counter is greater than 0.
- */
-static inline int pm_runtime_get_if_in_use(struct device *dev)
-{
-	return pm_runtime_get_if_active(dev, false);
-}
 
 /**
  * pm_suspend_ignore_children - Set runtime PM behavior regarding children.
@@ -257,8 +264,7 @@ static inline int pm_runtime_get_if_in_use(struct device *dev)
 {
 	return -EINVAL;
 }
-static inline int pm_runtime_get_if_active(struct device *dev,
-					   bool ign_usage_count)
+static inline int pm_runtime_get_if_active(struct device *dev)
 {
 	return -EINVAL;
 }

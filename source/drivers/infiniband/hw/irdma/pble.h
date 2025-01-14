@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 or Linux-OpenIB */
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /* Copyright (c) 2015 - 2019 Intel Corporation */
 #ifndef IRDMA_PBLE_H
 #define IRDMA_PBLE_H
@@ -69,7 +69,7 @@ struct irdma_add_page_info {
 struct irdma_chunk {
 	struct list_head list;
 	struct irdma_dma_info dmainfo;
-	void *bitmapbuf;
+	unsigned long *bitmapbuf;
 
 	u32 sizeofbitmap;
 	u64 size;
@@ -114,7 +114,7 @@ void irdma_free_pble(struct irdma_hmc_pble_rsrc *pble_rsrc,
 		     struct irdma_pble_alloc *palloc);
 int irdma_get_pble(struct irdma_hmc_pble_rsrc *pble_rsrc,
 		   struct irdma_pble_alloc *palloc, u32 pble_cnt,
-		   bool level1_only);
+		   u8 lvl);
 int irdma_prm_add_pble_mem(struct irdma_pble_prm *pprm,
 			   struct irdma_chunk *pchunk);
 int irdma_prm_get_pbles(struct irdma_pble_prm *pprm,

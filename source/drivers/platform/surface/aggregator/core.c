@@ -7,7 +7,7 @@
  * Handles communication via requests as well as enabling, disabling, and
  * relaying of events.
  *
- * Copyright (C) 2019-2021 Maximilian Luz <luzmaximilian@gmail.com>
+ * Copyright (C) 2019-2022 Maximilian Luz <luzmaximilian@gmail.com>
  */
 
 #include <linux/acpi.h>
@@ -22,6 +22,7 @@
 #include <linux/sysfs.h>
 
 #include <linux/surface_aggregator/controller.h>
+#include <linux/surface_aggregator/device.h>
 
 #include "bus.h"
 #include "controller.h"
@@ -226,8 +227,8 @@ EXPORT_SYMBOL_GPL(ssam_client_bind);
 
 /* -- Glue layer (serdev_device -> ssam_controller). ------------------------ */
 
-static int ssam_receive_buf(struct serdev_device *dev, const unsigned char *buf,
-			    size_t n)
+static ssize_t ssam_receive_buf(struct serdev_device *dev, const u8 *buf,
+				size_t n)
 {
 	struct ssam_controller *ctrl;
 	int ret;
@@ -738,7 +739,7 @@ static void ssam_serial_hub_remove(struct serdev_device *serdev)
 	ssam_controller_lock(ctrl);
 
 	/* Remove all client devices. */
-	ssam_controller_remove_clients(ctrl);
+	ssam_remove_clients(&serdev->dev);
 
 	/* Act as if suspending to silence events. */
 	status = ssam_ctrl_notif_display_off(ctrl);

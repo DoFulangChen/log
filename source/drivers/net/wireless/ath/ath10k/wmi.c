@@ -3,6 +3,7 @@
  * Copyright (c) 2005-2011 Atheros Communications Inc.
  * Copyright (c) 2011-2017 Qualcomm Atheros, Inc.
  * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/skbuff.h>
@@ -3575,7 +3576,7 @@ static void ath10k_wmi_update_tim(struct ath10k *ar,
 	__le32 t;
 	u32 v, tim_len;
 
-	/* When FW reports 0 in tim_len, ensure atleast first byte
+	/* When FW reports 0 in tim_len, ensure at least first byte
 	 * in tim_bitmap is considered for pvm calculation.
 	 */
 	tim_len = tim_info->tim_len ? __le32_to_cpu(tim_info->tim_len) : 1;
@@ -3902,13 +3903,13 @@ void ath10k_wmi_event_host_swba(struct ath10k *ar, struct sk_buff *skb)
 		 * Once CSA counter is completed stop sending beacons until
 		 * actual channel switch is done
 		 */
-		if (arvif->vif->csa_active &&
+		if (arvif->vif->bss_conf.csa_active &&
 		    ieee80211_beacon_cntdwn_is_complete(arvif->vif)) {
 			ieee80211_csa_finish(arvif->vif);
 			continue;
 		}
 
-		bcn = ieee80211_beacon_get(ar->hw, arvif->vif);
+		bcn = ieee80211_beacon_get(ar->hw, arvif->vif, 0);
 		if (!bcn) {
 			ath10k_warn(ar, "could not get mac80211 beacon\n");
 			continue;
@@ -8184,28 +8185,6 @@ ath10k_wmi_10_2_4_op_gen_pdev_get_tpc_config(struct ath10k *ar, u32 param)
 	return skb;
 }
 
-size_t ath10k_wmi_fw_stats_num_peers(struct list_head *head)
-{
-	struct ath10k_fw_stats_peer *i;
-	size_t num = 0;
-
-	list_for_each_entry(i, head, list)
-		++num;
-
-	return num;
-}
-
-size_t ath10k_wmi_fw_stats_num_vdevs(struct list_head *head)
-{
-	struct ath10k_fw_stats_vdev *i;
-	size_t num = 0;
-
-	list_for_each_entry(i, head, list)
-		++num;
-
-	return num;
-}
-
 static void
 ath10k_wmi_fw_pdev_base_stats_fill(const struct ath10k_fw_stats_pdev *pdev,
 				   char *buf, u32 *length)
@@ -8482,8 +8461,8 @@ void ath10k_wmi_main_op_fw_stats_fill(struct ath10k *ar,
 		goto unlock;
 	}
 
-	num_peers = ath10k_wmi_fw_stats_num_peers(&fw_stats->peers);
-	num_vdevs = ath10k_wmi_fw_stats_num_vdevs(&fw_stats->vdevs);
+	num_peers = list_count_nodes(&fw_stats->peers);
+	num_vdevs = list_count_nodes(&fw_stats->vdevs);
 
 	ath10k_wmi_fw_pdev_base_stats_fill(pdev, buf, &len);
 	ath10k_wmi_fw_pdev_tx_stats_fill(pdev, buf, &len);
@@ -8540,8 +8519,8 @@ void ath10k_wmi_10x_op_fw_stats_fill(struct ath10k *ar,
 		goto unlock;
 	}
 
-	num_peers = ath10k_wmi_fw_stats_num_peers(&fw_stats->peers);
-	num_vdevs = ath10k_wmi_fw_stats_num_vdevs(&fw_stats->vdevs);
+	num_peers = list_count_nodes(&fw_stats->peers);
+	num_vdevs = list_count_nodes(&fw_stats->vdevs);
 
 	ath10k_wmi_fw_pdev_base_stats_fill(pdev, buf, &len);
 	ath10k_wmi_fw_pdev_extra_stats_fill(pdev, buf, &len);
@@ -8688,8 +8667,8 @@ void ath10k_wmi_10_4_op_fw_stats_fill(struct ath10k *ar,
 		goto unlock;
 	}
 
-	num_peers = ath10k_wmi_fw_stats_num_peers(&fw_stats->peers);
-	num_vdevs = ath10k_wmi_fw_stats_num_vdevs(&fw_stats->vdevs);
+	num_peers = list_count_nodes(&fw_stats->peers);
+	num_vdevs = list_count_nodes(&fw_stats->vdevs);
 
 	ath10k_wmi_fw_pdev_base_stats_fill(pdev, buf, &len);
 	ath10k_wmi_fw_pdev_extra_stats_fill(pdev, buf, &len);

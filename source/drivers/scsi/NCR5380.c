@@ -417,7 +417,7 @@ static int NCR5380_init(struct Scsi_Host *instance, int flags)
 	INIT_WORK(&hostdata->main_task, NCR5380_main);
 	hostdata->work_q = alloc_workqueue("ncr5380_%d",
 	                        WQ_UNBOUND | WQ_MEM_RECLAIM,
-	                        1, instance->host_no);
+				0, instance->host_no);
 	if (!hostdata->work_q)
 		return -ENOMEM;
 
@@ -544,7 +544,7 @@ static void complete_cmd(struct Scsi_Host *instance,
 		hostdata->sensing = NULL;
 	}
 
-	cmd->scsi_done(cmd);
+	scsi_done(cmd);
 }
 
 /**
@@ -570,7 +570,7 @@ static int NCR5380_queue_command(struct Scsi_Host *instance,
 	case WRITE_10:
 		shost_printk(KERN_DEBUG, instance, "WRITE attempted with NDEBUG_NO_WRITE set\n");
 		cmd->result = (DID_ERROR << 16);
-		cmd->scsi_done(cmd);
+		scsi_done(cmd);
 		return 0;
 	}
 #endif /* (NDEBUG & NDEBUG_NO_WRITE) */
@@ -858,7 +858,7 @@ static void NCR5380_dma_complete(struct Scsi_Host *instance)
  * latency, but a bus reset will reset chip logic. Checking for parity error
  * is unnecessary because that interrupt is never enabled. A Loss of BSY
  * condition will clear DMA Mode. We can tell when this occurs because the
- * the Busy Monitor interrupt is enabled together with DMA Mode.
+ * Busy Monitor interrupt is enabled together with DMA Mode.
  */
 
 static irqreturn_t __maybe_unused NCR5380_intr(int irq, void *dev_id)
@@ -958,7 +958,7 @@ static irqreturn_t __maybe_unused NCR5380_intr(int irq, void *dev_id)
  * hostdata->connected will be set to cmd.
  * SELECT interrupt will be disabled.
  *
- * If failed (no target) : cmd->scsi_done() will be called, and the
+ * If failed (no target) : scsi_done() will be called, and the
  * cmd->result host byte set to DID_BAD_TARGET.
  */
 
@@ -1485,7 +1485,6 @@ static int NCR5380_transfer_dma(struct Scsi_Host *instance,
 				unsigned char **data)
 {
 	struct NCR5380_hostdata *hostdata = shost_priv(instance);
-	struct NCR5380_cmd *ncmd = NCR5380_to_ncmd(hostdata->connected);
 	int c = *count;
 	unsigned char p = *phase;
 	unsigned char *d = *data;
@@ -1497,7 +1496,7 @@ static int NCR5380_transfer_dma(struct Scsi_Host *instance,
 		return -1;
 	}
 
-	ncmd->phase = p;
+	NCR5380_to_ncmd(hostdata->connected)->phase = p;
 
 	if (p & SR_IO) {
 		if (hostdata->read_overruns)
@@ -1609,44 +1608,45 @@ static int NCR5380_transfer_dma(struct Scsi_Host *instance,
  * request.
  */
 
-	if ((hostdata->flags & FLAG_DMA_FIXUP) &&
-	    (NCR5380_read(BUS_AND_STATUS_REG) & BASR_PHASE_MATCH)) {
-		/*
-		 * The workaround was to transfer fewer bytes than we
-		 * intended to with the pseudo-DMA receive function, wait for
-		 * the chip to latch the last byte, read it, and then disable
-		 * DMA mode.
-		 *
-		 * After REQ is asserted, the NCR5380 asserts DRQ and ACK.
-		 * REQ is deasserted when ACK is asserted, and not reasserted
-		 * until ACK goes false. Since the NCR5380 won't lower ACK
-		 * until DACK is asserted, which won't happen unless we twiddle
-		 * the DMA port or we take the NCR5380 out of DMA mode, we
-		 * can guarantee that we won't handshake another extra
-		 * byte.
-		 *
-		 * If sending, wait for the last byte to be sent. If REQ is
-		 * being asserted for the byte we're interested, we'll ACK it
-		 * and it will go false.
-		 */
-		if (!NCR5380_poll_politely(hostdata, BUS_AND_STATUS_REG,
-					   BASR_DRQ, BASR_DRQ, 0)) {
-			if ((p & SR_IO) &&
-			    (NCR5380_read(BUS_AND_STATUS_REG) & BASR_PHASE_MATCH)) {
-				if (!NCR5380_poll_politely(hostdata, STATUS_REG,
-							   SR_REQ, 0, 0)) {
-					d[c] = NCR5380_read(INPUT_DATA_REG);
-					--ncmd->this_residual;
-				} else {
-					result = -1;
-					scmd_printk(KERN_ERR, hostdata->connected,
-						    "PDMA fixup: !REQ timeout\n");
-				}
+	if (hostdata->flags & FLAG_DMA_FIXUP) {
+		if (p & SR_IO) {
+			/*
+			 * The workaround was to transfer fewer bytes than we
+			 * intended to with the pseudo-DMA read function, wait for
+			 * the chip to latch the last byte, read it, and then disable
+			 * pseudo-DMA mode.
+			 *
+			 * After REQ is asserted, the NCR5380 asserts DRQ and ACK.
+			 * REQ is deasserted when ACK is asserted, and not reasserted
+			 * until ACK goes false.  Since the NCR5380 won't lower ACK
+			 * until DACK is asserted, which won't happen unless we twiddle
+			 * the DMA port or we take the NCR5380 out of DMA mode, we
+			 * can guarantee that we won't handshake another extra
+			 * byte.
+			 */
+
+			if (NCR5380_poll_politely(hostdata, BUS_AND_STATUS_REG,
+			                          BASR_DRQ, BASR_DRQ, 0) < 0) {
+				result = -1;
+				shost_printk(KERN_ERR, instance, "PDMA read: DRQ timeout\n");
 			}
-		} else if (NCR5380_read(BUS_AND_STATUS_REG) & BASR_PHASE_MATCH) {
-			result = -1;
-			scmd_printk(KERN_ERR, hostdata->connected,
-				    "PDMA fixup: DRQ timeout\n");
+			if (NCR5380_poll_politely(hostdata, STATUS_REG,
+			                          SR_REQ, 0, 0) < 0) {
+				result = -1;
+				shost_printk(KERN_ERR, instance, "PDMA read: !REQ timeout\n");
+			}
+			d[*count - 1] = NCR5380_read(INPUT_DATA_REG);
+		} else {
+			/*
+			 * Wait for the last byte to be sent.  If REQ is being asserted for
+			 * the byte we're interested, we'll ACK it and it will go false.
+			 */
+			if (NCR5380_poll_politely2(hostdata,
+			     BUS_AND_STATUS_REG, BASR_DRQ, BASR_DRQ,
+			     BUS_AND_STATUS_REG, BASR_PHASE_MATCH, 0, 0) < 0) {
+				result = -1;
+				shost_printk(KERN_ERR, instance, "PDMA write: DRQ and phase timeout\n");
+			}
 		}
 	}
 
@@ -2260,7 +2260,7 @@ static int NCR5380_abort(struct scsi_cmnd *cmd)
 		dsprintk(NDEBUG_ABORT, instance,
 		         "abort: removed %p from issue queue\n", cmd);
 		cmd->result = DID_ABORT << 16;
-		cmd->scsi_done(cmd); /* No tag or busy flag to worry about */
+		scsi_done(cmd); /* No tag or busy flag to worry about */
 		goto out;
 	}
 
@@ -2355,7 +2355,7 @@ static void bus_reset_cleanup(struct Scsi_Host *instance)
 	list_for_each_entry(ncmd, &hostdata->autosense, list) {
 		struct scsi_cmnd *cmd = NCR5380_to_scmd(ncmd);
 
-		cmd->scsi_done(cmd);
+		scsi_done(cmd);
 	}
 	INIT_LIST_HEAD(&hostdata->autosense);
 
@@ -2398,7 +2398,7 @@ static int NCR5380_host_reset(struct scsi_cmnd *cmd)
 		struct scsi_cmnd *scmd = NCR5380_to_scmd(ncmd);
 
 		scmd->result = DID_RESET << 16;
-		scmd->scsi_done(scmd);
+		scsi_done(scmd);
 	}
 	INIT_LIST_HEAD(&hostdata->unissued);
 

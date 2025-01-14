@@ -8,8 +8,6 @@
 #include <linux/units.h>
 #include <linux/usb.h>
 
-#include <linux/ethtool.h>
-
 #include <linux/can.h>
 #include <linux/can/dev.h>
 #include <linux/can/error.h>
@@ -116,7 +114,6 @@
 
 /* ALC register */
 #define F81604_SJA1000_ALC_MASK 0x1f
-#define CAN_ERR_CNT 0x00000200U
 
 /* table of devices that work with this driver */
 static const struct usb_device_id f81604_table[] = {
@@ -909,7 +906,7 @@ static netdev_tx_t f81604_start_xmit(struct sk_buff *skb,
 	struct urb *write_urb;
 	int ret;
 
-	if (can_dropped_invalid_skb(netdev, skb))
+	if (can_dev_dropped_skb(netdev, skb))
 		return NETDEV_TX_OK;
 
 	netif_stop_queue(netdev);

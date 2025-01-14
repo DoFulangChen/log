@@ -35,6 +35,7 @@
 #include <drm/drm_device.h>
 #include <drm/drm_file.h>
 #include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
 #include <drm/drm_vblank.h>
 #include <drm/radeon_drm.h>
 
@@ -1014,65 +1015,45 @@ static int r100_cp_init_microcode(struct radeon_device *rdev)
 
 	DRM_DEBUG_KMS("\n");
 
-	switch (rdev->family) {
-	case CHIP_R100:
-	case CHIP_RV100:
-	case CHIP_RV200:
-	case CHIP_RS100:
-	case CHIP_RS200:
+	if ((rdev->family == CHIP_R100) || (rdev->family == CHIP_RV100) ||
+	    (rdev->family == CHIP_RV200) || (rdev->family == CHIP_RS100) ||
+	    (rdev->family == CHIP_RS200)) {
 		DRM_INFO("Loading R100 Microcode\n");
 		fw_name = FIRMWARE_R100;
-		break;
-
-	case CHIP_R200:
-	case CHIP_RV250:
-	case CHIP_RV280:
-	case CHIP_RS300:
+	} else if ((rdev->family == CHIP_R200) ||
+		   (rdev->family == CHIP_RV250) ||
+		   (rdev->family == CHIP_RV280) ||
+		   (rdev->family == CHIP_RS300)) {
 		DRM_INFO("Loading R200 Microcode\n");
 		fw_name = FIRMWARE_R200;
-		break;
-
-	case CHIP_R300:
-	case CHIP_R350:
-	case CHIP_RV350:
-	case CHIP_RV380:
-	case CHIP_RS400:
-	case CHIP_RS480:
+	} else if ((rdev->family == CHIP_R300) ||
+		   (rdev->family == CHIP_R350) ||
+		   (rdev->family == CHIP_RV350) ||
+		   (rdev->family == CHIP_RV380) ||
+		   (rdev->family == CHIP_RS400) ||
+		   (rdev->family == CHIP_RS480)) {
 		DRM_INFO("Loading R300 Microcode\n");
 		fw_name = FIRMWARE_R300;
-		break;
-
-	case CHIP_R420:
-	case CHIP_R423:
-	case CHIP_RV410:
+	} else if ((rdev->family == CHIP_R420) ||
+		   (rdev->family == CHIP_R423) ||
+		   (rdev->family == CHIP_RV410)) {
 		DRM_INFO("Loading R400 Microcode\n");
 		fw_name = FIRMWARE_R420;
-		break;
-
-	case CHIP_RS690:
-	case CHIP_RS740:
+	} else if ((rdev->family == CHIP_RS690) ||
+		   (rdev->family == CHIP_RS740)) {
 		DRM_INFO("Loading RS690/RS740 Microcode\n");
 		fw_name = FIRMWARE_RS690;
-		break;
-
-	case CHIP_RS600:
+	} else if (rdev->family == CHIP_RS600) {
 		DRM_INFO("Loading RS600 Microcode\n");
 		fw_name = FIRMWARE_RS600;
-		break;
-
-	case CHIP_RV515:
-	case CHIP_R520:
-	case CHIP_RV530:
-	case CHIP_R580:
-	case CHIP_RV560:
-	case CHIP_RV570:
+	} else if ((rdev->family == CHIP_RV515) ||
+		   (rdev->family == CHIP_R520) ||
+		   (rdev->family == CHIP_RV530) ||
+		   (rdev->family == CHIP_R580) ||
+		   (rdev->family == CHIP_RV560) ||
+		   (rdev->family == CHIP_RV570)) {
 		DRM_INFO("Loading R500 Microcode\n");
 		fw_name = FIRMWARE_R520;
-		break;
-
-	default:
-		DRM_ERROR("Unsupported Radeon family %u\n", rdev->family);
-		return -EINVAL;
 	}
 
 	err = request_firmware(&rdev->me_fw, fw_name, rdev->dev);
@@ -2948,7 +2929,7 @@ static void r100_set_safe_registers(struct radeon_device *rdev)
 #if defined(CONFIG_DEBUG_FS)
 static int r100_debugfs_rbbm_info_show(struct seq_file *m, void *unused)
 {
-	struct radeon_device *rdev = (struct radeon_device *)m->private;
+	struct radeon_device *rdev = m->private;
 	uint32_t reg, value;
 	unsigned i;
 
@@ -2967,7 +2948,7 @@ static int r100_debugfs_rbbm_info_show(struct seq_file *m, void *unused)
 
 static int r100_debugfs_cp_ring_info_show(struct seq_file *m, void *unused)
 {
-	struct radeon_device *rdev = (struct radeon_device *)m->private;
+	struct radeon_device *rdev = m->private;
 	struct radeon_ring *ring = &rdev->ring[RADEON_RING_TYPE_GFX_INDEX];
 	uint32_t rdp, wdp;
 	unsigned count, i, j;
@@ -2993,7 +2974,7 @@ static int r100_debugfs_cp_ring_info_show(struct seq_file *m, void *unused)
 
 static int r100_debugfs_cp_csq_fifo_show(struct seq_file *m, void *unused)
 {
-	struct radeon_device *rdev = (struct radeon_device *)m->private;
+	struct radeon_device *rdev = m->private;
 	uint32_t csq_stat, csq2_stat, tmp;
 	unsigned r_rptr, r_wptr, ib1_rptr, ib1_wptr, ib2_rptr, ib2_wptr;
 	unsigned i;
@@ -3041,7 +3022,7 @@ static int r100_debugfs_cp_csq_fifo_show(struct seq_file *m, void *unused)
 
 static int r100_debugfs_mc_info_show(struct seq_file *m, void *unused)
 {
-	struct radeon_device *rdev = (struct radeon_device *)m->private;
+	struct radeon_device *rdev = m->private;
 	uint32_t tmp;
 
 	tmp = RREG32(RADEON_CONFIG_MEMSIZE);

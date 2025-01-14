@@ -7,21 +7,7 @@
 #include <linux/stddef.h>
 #include <linux/debugobjects.h>
 #include <linux/stringify.h>
-
-struct timer_list {
-	/*
-	 * All fields that change during normal runtime grouped to the
-	 * same cacheline
-	 */
-	struct hlist_node	entry;
-	unsigned long		expires;
-	void			(*function)(struct timer_list *);
-	u32			flags;
-
-#ifdef CONFIG_LOCKDEP
-	struct lockdep_map	lockdep_map;
-#endif
-};
+#include <linux/timer_types.h>
 
 #ifdef CONFIG_LOCKDEP
 /*
@@ -77,8 +63,7 @@ struct timer_list {
 		.entry = { .next = TIMER_ENTRY_STATIC },	\
 		.function = (_function),			\
 		.flags = (_flags),				\
-		__TIMER_LOCKDEP_MAP_INITIALIZER(		\
-			__FILE__ ":" __stringify(__LINE__))	\
+		__TIMER_LOCKDEP_MAP_INITIALIZER(FILE_LINE)	\
 	}
 
 #define DEFINE_TIMER(_name, _function)				\
@@ -200,8 +185,6 @@ static inline int del_timer_sync(struct timer_list *timer)
 	return timer_delete_sync(timer);
 }
 
-#define del_singleshot_timer_sync(t) del_timer_sync(t)
-
 /**
  * del_timer - Delete a pending timer
  * @timer:	The timer to be deleted
@@ -218,14 +201,6 @@ static inline int del_timer(struct timer_list *timer)
 extern void init_timers(void);
 struct hrtimer;
 extern enum hrtimer_restart it_real_fn(struct hrtimer *);
-
-#if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
-struct ctl_table;
-
-extern unsigned int sysctl_timer_migration;
-int timer_migration_handler(struct ctl_table *table, int write,
-			    void *buffer, size_t *lenp, loff_t *ppos);
-#endif
 
 unsigned long __round_jiffies(unsigned long j, int cpu);
 unsigned long __round_jiffies_relative(unsigned long j, int cpu);

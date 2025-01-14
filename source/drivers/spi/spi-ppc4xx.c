@@ -25,10 +25,13 @@
 #include <linux/slab.h>
 #include <linux/errno.h>
 #include <linux/wait.h>
+#include <linux/platform_device.h>
 #include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/platform_device.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_bitbang.h>
@@ -125,7 +128,7 @@ struct ppc4xx_spi {
 	unsigned char *rx;
 
 	struct spi_ppc4xx_regs __iomem *regs; /* pointer to the registers */
-	struct spi_master *master;
+	struct spi_controller *host;
 	struct device *dev;
 };
 
@@ -142,7 +145,7 @@ static int spi_ppc4xx_txrx(struct spi_device *spi, struct spi_transfer *t)
 	dev_dbg(&spi->dev, "txrx: tx %p, rx %p, len %d\n",
 		t->tx_buf, t->rx_buf, t->len);
 
-	hw = spi_master_get_devdata(spi->master);
+	hw = spi_controller_get_devdata(spi->controller);
 
 	hw->tx = t->tx_buf;
 	hw->rx = t->rx_buf;
@@ -160,7 +163,7 @@ static int spi_ppc4xx_txrx(struct spi_device *spi, struct spi_transfer *t)
 
 static int spi_ppc4xx_setupxfer(struct spi_device *spi, struct spi_transfer *t)
 {
-	struct ppc4xx_spi *hw = spi_master_get_devdata(spi->master);
+	struct ppc4xx_spi *hw = spi_controller_get_devdata(spi->controller);
 	struct spi_ppc4xx_cs *cs = spi->controller_state;
 	int scr;
 	u8 cdm = 0;
@@ -334,7 +337,7 @@ static void spi_ppc4xx_enable(struct ppc4xx_spi *hw)
 static int spi_ppc4xx_of_probe(struct platform_device *op)
 {
 	struct ppc4xx_spi *hw;
-	struct spi_master *master;
+	struct spi_controller *host;
 	struct spi_bitbang *bbp;
 	struct resource resource;
 	struct device_node *np = op->dev.of_node;
@@ -343,20 +346,20 @@ static int spi_ppc4xx_of_probe(struct platform_device *op)
 	int ret;
 	const unsigned int *clk;
 
-	master = spi_alloc_master(dev, sizeof(*hw));
-	if (master == NULL)
+	host = spi_alloc_host(dev, sizeof(*hw));
+	if (host == NULL)
 		return -ENOMEM;
-	master->dev.of_node = np;
-	platform_set_drvdata(op, master);
-	hw = spi_master_get_devdata(master);
-	hw->master = master;
+	host->dev.of_node = np;
+	platform_set_drvdata(op, host);
+	hw = spi_controller_get_devdata(host);
+	hw->host = host;
 	hw->dev = dev;
 
 	init_completion(&hw->done);
 
 	/* Setup the state for the bitbang driver */
 	bbp = &hw->bitbang;
-	bbp->master = hw->master;
+	bbp->master = hw->host;
 	bbp->setup_transfer = spi_ppc4xx_setupxfer;
 	bbp->txrx_bufs = spi_ppc4xx_txrx;
 	bbp->use_dma = 0;
@@ -379,7 +382,7 @@ static int spi_ppc4xx_of_probe(struct platform_device *op)
 	if (opbnp == NULL) {
 		dev_err(dev, "OPB: cannot find node\n");
 		ret = -ENODEV;
-		goto free_master;
+		goto free_host;
 	}
 	/* Get the clock (Hz) for the OPB */
 	clk = of_get_property(opbnp, "clock-frequency", NULL);
@@ -387,7 +390,7 @@ static int spi_ppc4xx_of_probe(struct platform_device *op)
 		dev_err(dev, "OPB: no clock-frequency property set\n");
 		of_node_put(opbnp);
 		ret = -ENODEV;
-		goto free_master;
+		goto free_host;
 	}
 	hw->opb_freq = *clk;
 	hw->opb_freq >>= 2;
@@ -396,7 +399,7 @@ static int spi_ppc4xx_of_probe(struct platform_device *op)
 	ret = of_address_to_resource(np, 0, &resource);
 	if (ret) {
 		dev_err(dev, "error while parsing device node resource\n");
-		goto free_master;
+		goto free_host;
 	}
 	hw->mapbase = resource.start;
 	hw->mapsize = resource_size(&resource);
@@ -405,20 +408,16 @@ static int spi_ppc4xx_of_probe(struct platform_device *op)
 	if (hw->mapsize < sizeof(struct spi_ppc4xx_regs)) {
 		dev_err(dev, "too small to map registers\n");
 		ret = -EINVAL;
-		goto free_master;
+		goto free_host;
 	}
 
 	/* Request IRQ */
-	ret = platform_get_irq(op, 0);
-	if (ret < 0)
-		goto free_host;
-	hw->irqnum = ret;
-
+	hw->irqnum = irq_of_parse_and_map(np, 0);
 	ret = request_irq(hw->irqnum, spi_ppc4xx_int,
 			  0, "spi_ppc4xx_of", (void *)hw);
 	if (ret) {
 		dev_err(dev, "unable to allocate interrupt\n");
-		goto free_master;
+		goto free_host;
 	}
 
 	if (!request_mem_region(hw->mapbase, hw->mapsize, DRIVER_NAME)) {
@@ -441,7 +440,7 @@ static int spi_ppc4xx_of_probe(struct platform_device *op)
 	dev->dma_mask = 0;
 	ret = spi_bitbang_start(bbp);
 	if (ret) {
-		dev_err(dev, "failed to register SPI master\n");
+		dev_err(dev, "failed to register SPI host\n");
 		goto unmap_regs;
 	}
 
@@ -455,24 +454,23 @@ map_io_error:
 	release_mem_region(hw->mapbase, hw->mapsize);
 request_mem_error:
 	free_irq(hw->irqnum, hw);
-free_master:
-	spi_master_put(master);
+free_host:
+	spi_controller_put(host);
 
 	dev_err(dev, "initialization failed\n");
 	return ret;
 }
 
-static int spi_ppc4xx_of_remove(struct platform_device *op)
+static void spi_ppc4xx_of_remove(struct platform_device *op)
 {
-	struct spi_master *master = platform_get_drvdata(op);
-	struct ppc4xx_spi *hw = spi_master_get_devdata(master);
+	struct spi_controller *host = platform_get_drvdata(op);
+	struct ppc4xx_spi *hw = spi_controller_get_devdata(host);
 
 	spi_bitbang_stop(&hw->bitbang);
 	release_mem_region(hw->mapbase, hw->mapsize);
 	free_irq(hw->irqnum, hw);
 	iounmap(hw->regs);
-	spi_master_put(master);
-	return 0;
+	spi_controller_put(host);
 }
 
 static const struct of_device_id spi_ppc4xx_of_match[] = {
@@ -484,7 +482,7 @@ MODULE_DEVICE_TABLE(of, spi_ppc4xx_of_match);
 
 static struct platform_driver spi_ppc4xx_of_driver = {
 	.probe = spi_ppc4xx_of_probe,
-	.remove = spi_ppc4xx_of_remove,
+	.remove_new = spi_ppc4xx_of_remove,
 	.driver = {
 		.name = DRIVER_NAME,
 		.of_match_table = spi_ppc4xx_of_match,

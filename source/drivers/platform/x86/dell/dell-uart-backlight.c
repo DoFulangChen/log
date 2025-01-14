@@ -39,7 +39,8 @@ static struct file *ftty;
 
 unsigned int (*io_serial_in)(struct uart_port *p, int offset);
 int (*uart_write)(struct tty_struct *tty, const unsigned char *buf, int count);
-unsigned int (*uart_chars_in_buffer)(struct tty_struct *tty);
+void (*uart_flush_chars)(struct tty_struct *tty);
+
 
 static bool force;
 module_param(force, bool, 0444);
@@ -160,8 +161,7 @@ static int dell_uart_write(struct uart_8250_port *up, __u8 *buf, int len)
 	tty_port_tty_wakeup(&port->state->port);
 	tty = tty_port_tty_get(&port->state->port);
 	actual = uart_write(tty, buf, len);
-	while (uart_chars_in_buffer(tty))
-		udelay(10);
+	uart_flush_chars(tty);
 
 	return actual;
 }
@@ -401,7 +401,7 @@ static int dell_uart_startup(struct dell_uart_backlight *dell_pdata)
 	tty = port->state->port.tty;
 	io_serial_in = port->serial_in;
 	uart_write = tty->driver->ops->write;
-	uart_chars_in_buffer = tty->driver->ops->chars_in_buffer;
+	uart_flush_chars = tty->driver->ops->flush_chars;
 
 	return 0;
 }
@@ -460,20 +460,15 @@ static int dell_uart_bl_add(struct acpi_device *dev)
 	dell_uart_bd->props.brightness = 100;
 	backlight_update_status(dell_uart_bd);
 
-	/* unregister acpi backlight interface */
-	acpi_video_set_dmi_backlight_type(acpi_backlight_vendor);
-
 	return 0;
 }
 
-static int dell_uart_bl_remove(struct acpi_device *dev)
+static void dell_uart_bl_remove(struct acpi_device *dev)
 {
 	struct dell_uart_backlight *dell_pdata = dev->driver_data;
 
 	backlight_device_unregister(dell_pdata->dell_uart_bd);
 	kfree_sensitive(dell_pdata);
-
-	return 0;
 }
 
 static int dell_uart_bl_suspend(struct device *dev)

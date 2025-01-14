@@ -645,8 +645,6 @@ fcloop_fcp_recv_work(struct work_struct *work)
 	}
 	if (ret)
 		fcloop_call_host_done(fcpreq, tfcp_req, ret);
-
-	return;
 }
 
 static void
@@ -997,11 +995,6 @@ fcloop_nport_free(struct kref *ref)
 {
 	struct fcloop_nport *nport =
 		container_of(ref, struct fcloop_nport, ref);
-	unsigned long flags;
-
-	spin_lock_irqsave(&fcloop_lock, flags);
-	list_del(&nport->nport_list);
-	spin_unlock_irqrestore(&fcloop_lock, flags);
 
 	kfree(nport);
 }
@@ -1168,7 +1161,8 @@ __wait_localport_unreg(struct fcloop_lport *lport)
 
 	ret = nvme_fc_unregister_localport(lport->localport);
 
-	wait_for_completion(&lport->unreg_done);
+	if (!ret)
+		wait_for_completion(&lport->unreg_done);
 
 	kfree(lport);
 
@@ -1357,6 +1351,8 @@ __unlink_remote_port(struct fcloop_nport *nport)
 	if (rport && nport->tport)
 		nport->tport->remoteport = NULL;
 	nport->rport = NULL;
+
+	list_del(&nport->nport_list);
 
 	return rport;
 }
@@ -1568,7 +1564,7 @@ static int __init fcloop_init(void)
 {
 	int ret;
 
-	fcloop_class = class_create(THIS_MODULE, "fcloop");
+	fcloop_class = class_create("fcloop");
 	if (IS_ERR(fcloop_class)) {
 		pr_err("couldn't register class fcloop\n");
 		ret = PTR_ERR(fcloop_class);
@@ -1654,4 +1650,5 @@ static void __exit fcloop_exit(void)
 module_init(fcloop_init);
 module_exit(fcloop_exit);
 
+MODULE_DESCRIPTION("NVMe target FC loop transport driver");
 MODULE_LICENSE("GPL v2");

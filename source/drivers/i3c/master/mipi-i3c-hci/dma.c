@@ -139,7 +139,7 @@ struct hci_rh_data {
 
 struct hci_rings_data {
 	unsigned int total;
-	struct hci_rh_data headers[];
+	struct hci_rh_data headers[] __counted_by(total);
 };
 
 struct hci_dma_dev_ibi_data {
@@ -223,11 +223,14 @@ static int hci_dma_init(struct i3c_hci *hci)
 	}
 	if (nr_rings > XFER_RINGS)
 		nr_rings = XFER_RINGS;
-	rings = kzalloc(sizeof(*rings) + nr_rings * sizeof(*rh), GFP_KERNEL);
+	rings = kzalloc(struct_size(rings, headers, nr_rings), GFP_KERNEL);
 	if (!rings)
 		return -ENOMEM;
 	hci->io_data = rings;
 	rings->total = nr_rings;
+
+	regval = FIELD_PREP(MAX_HEADER_COUNT, rings->total);
+	rhs_reg_write(CONTROL, regval);
 
 	for (i = 0; i < rings->total; i++) {
 		u32 offset = rhs_reg_read(RHn_OFFSET(i));
@@ -328,11 +331,10 @@ static int hci_dma_init(struct i3c_hci *hci)
 		rh_reg_write(INTR_SIGNAL_ENABLE, regval);
 
 ring_ready:
-		rh_reg_write(RING_CONTROL, RING_CTRL_ENABLE);
+		rh_reg_write(RING_CONTROL, RING_CTRL_ENABLE |
+					   RING_CTRL_RUN_STOP);
 	}
 
-	regval = FIELD_PREP(MAX_HEADER_COUNT, rings->total);
-	rhs_reg_write(CONTROL, regval);
 	return 0;
 
 err_out:
@@ -363,6 +365,7 @@ static int hci_dma_queue_xfer(struct i3c_hci *hci,
 	struct hci_rh_data *rh;
 	unsigned int i, ring, enqueue_ptr;
 	u32 op1_val, op2_val;
+	void *buf;
 
 	/* For now we only use ring 0 */
 	ring = 0;
@@ -391,9 +394,10 @@ static int hci_dma_queue_xfer(struct i3c_hci *hci,
 
 		/* 2nd and 3rd words of Data Buffer Descriptor Structure */
 		if (xfer->data) {
+			buf = xfer->bounce_buf ? xfer->bounce_buf : xfer->data;
 			xfer->data_dma =
 				dma_map_single(&hci->master.dev,
-					       xfer->data,
+					       buf,
 					       xfer->data_len,
 					       xfer->rnw ?
 						  DMA_FROM_DEVICE :
@@ -760,9 +764,11 @@ static bool hci_dma_irq_handler(struct i3c_hci *hci, unsigned int mask)
 		if (status & INTR_RING_OP)
 			complete(&rh->op_done);
 
-		if (status & INTR_TRANSFER_ABORT)
+		if (status & INTR_TRANSFER_ABORT) {
 			dev_notice_ratelimited(&hci->master.dev,
 				"ring %d: Transfer Aborted\n", i);
+			mipi_i3c_hci_resume(hci);
+		}
 		if (status & INTR_WARN_INS_STOP_MODE)
 			dev_warn_ratelimited(&hci->master.dev,
 				"ring %d: Inserted Stop on Mode Change\n", i);

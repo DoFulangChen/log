@@ -295,7 +295,7 @@ static int ipc_pcie_probe(struct pci_dev *pci,
 	ret = dma_set_mask(ipc_pcie->dev, DMA_BIT_MASK(64));
 	if (ret) {
 		dev_err(ipc_pcie->dev, "Could not set PCI DMA mask: %d", ret);
-		return ret;
+		goto set_mask_fail;
 	}
 
 	ipc_pcie_config_aspm(ipc_pcie);
@@ -323,6 +323,7 @@ static int ipc_pcie_probe(struct pci_dev *pci,
 imem_init_fail:
 	ipc_pcie_resources_release(ipc_pcie);
 resources_req_fail:
+set_mask_fail:
 	pci_disable_device(pci);
 pci_enable_fail:
 	kfree(ipc_pcie);
@@ -332,6 +333,7 @@ ret_fail:
 
 static const struct pci_device_id iosm_ipc_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, INTEL_CP_DEVICE_7560_ID) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, INTEL_CP_DEVICE_7360_ID) },
 	{}
 };
 MODULE_DEVICE_TABLE(pci, iosm_ipc_ids);
@@ -351,9 +353,6 @@ static int __maybe_unused ipc_pcie_suspend_s2idle(struct iosm_pcie *ipc_pcie)
 	smp_mb__after_atomic();
 
 	ipc_imem_pm_s2idle_sleep(ipc_pcie->imem, true);
-
-	/* Let PCI core know this device should stay at D0 */
-	pci_save_state(ipc_pcie->pci);
 
 	return 0;
 }
@@ -378,67 +377,22 @@ static int __maybe_unused ipc_pcie_resume_s2idle(struct iosm_pcie *ipc_pcie)
 
 int __maybe_unused ipc_pcie_suspend(struct iosm_pcie *ipc_pcie)
 {
-	struct pci_dev *pdev;
-	int ret;
-
-	pdev = ipc_pcie->pci;
-
-	/* Execute D3 one time. */
-	if (pdev->current_state != PCI_D0) {
-		dev_dbg(ipc_pcie->dev, "done for PM=%d", pdev->current_state);
-		return 0;
-	}
-
 	/* The HAL shall ask the shared memory layer whether D3 is allowed. */
 	ipc_imem_pm_suspend(ipc_pcie->imem);
 
-	/* Save the PCI configuration space of a device before suspending. */
-	ret = pci_save_state(pdev);
-
-	if (ret) {
-		dev_err(ipc_pcie->dev, "pci_save_state error=%d", ret);
-		return ret;
-	}
-
-	/* Set the power state of a PCI device.
-	 * Transition a device to a new power state, using the device's PCI PM
-	 * registers.
-	 */
-	ret = pci_set_power_state(pdev, PCI_D3cold);
-
-	if (ret) {
-		dev_err(ipc_pcie->dev, "pci_set_power_state error=%d", ret);
-		return ret;
-	}
-
 	dev_dbg(ipc_pcie->dev, "SUSPEND done");
-	return ret;
+	return 0;
 }
 
 int __maybe_unused ipc_pcie_resume(struct iosm_pcie *ipc_pcie)
 {
-	int ret;
-
-	/* Set the power state of a PCI device.
-	 * Transition a device to a new power state, using the device's PCI PM
-	 * registers.
-	 */
-	ret = pci_set_power_state(ipc_pcie->pci, PCI_D0);
-
-	if (ret) {
-		dev_err(ipc_pcie->dev, "pci_set_power_state error=%d", ret);
-		return ret;
-	}
-
-	pci_restore_state(ipc_pcie->pci);
-
 	/* The HAL shall inform the shared memory layer that the device is
 	 * active.
 	 */
 	ipc_imem_pm_resume(ipc_pcie->imem);
 
 	dev_dbg(ipc_pcie->dev, "RESUME done");
-	return ret;
+	return 0;
 }
 
 static int __maybe_unused ipc_pcie_suspend_cb(struct device *dev)

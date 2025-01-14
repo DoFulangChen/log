@@ -23,9 +23,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
 #include <linux/mtd/partitions.h>
-#include <linux/of_address.h>
-#include <linux/of_device.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/clk.h>
@@ -130,7 +128,7 @@ struct pl35x_nand {
  * @conf_regs: SMC configuration registers for command phase
  * @io_regs: NAND data registers for data phase
  * @controller: Core NAND controller structure
- * @chip: NAND chip information structure
+ * @chips: List of connected NAND chips
  * @selected_chip: NAND chip currently selected by the controller
  * @assigned_cs: List of assigned CS
  * @ecc_buf: Temporary buffer to extract ECC bytes
@@ -1172,13 +1170,11 @@ static int pl35x_nand_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int pl35x_nand_remove(struct platform_device *pdev)
+static void pl35x_nand_remove(struct platform_device *pdev)
 {
 	struct pl35x_nandc *nfc = platform_get_drvdata(pdev);
 
 	pl35x_nand_chips_cleanup(nfc);
-
-	return 0;
 }
 
 static const struct of_device_id pl35x_nand_of_match[] = {
@@ -1189,7 +1185,7 @@ MODULE_DEVICE_TABLE(of, pl35x_nand_of_match);
 
 static struct platform_driver pl35x_nandc_driver = {
 	.probe = pl35x_nand_probe,
-	.remove	= pl35x_nand_remove,
+	.remove_new = pl35x_nand_remove,
 	.driver = {
 		.name = PL35X_NANDC_DRIVER_NAME,
 		.of_match_table = pl35x_nand_of_match,

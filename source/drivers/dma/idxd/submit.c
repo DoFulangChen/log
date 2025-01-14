@@ -21,15 +21,6 @@ static struct idxd_desc *__get_desc(struct idxd_wq *wq, int idx, int cpu)
 	if (device_pasid_enabled(idxd))
 		desc->hw->pasid = idxd->pasid;
 
-	/*
-	 * On host, MSIX vecotr 0 is used for misc interrupt. Therefore when we match
-	 * vector 1:1 to the WQ id, we need to add 1
-	 */
-	if (!idxd->int_handles)
-		desc->hw->int_handle = wq->id + 1;
-	else
-		desc->hw->int_handle = idxd->int_handles[wq->id];
-
 	return desc;
 }
 
@@ -70,6 +61,7 @@ struct idxd_desc *idxd_alloc_desc(struct idxd_wq *wq, enum idxd_op_type optype)
 
 	return __get_desc(wq, idx, cpu);
 }
+EXPORT_SYMBOL_NS_GPL(idxd_alloc_desc, IDXD);
 
 void idxd_free_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 {
@@ -78,6 +70,7 @@ void idxd_free_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 	desc->cpu = -1;
 	sbitmap_queue_clear(&wq->sbq, desc->id, cpu);
 }
+EXPORT_SYMBOL_NS_GPL(idxd_free_desc, IDXD);
 
 static struct idxd_desc *list_abort_desc(struct idxd_wq *wq, struct idxd_irq_entry *ie,
 					 struct idxd_desc *desc)
@@ -134,17 +127,19 @@ static void llist_abort_desc(struct idxd_wq *wq, struct idxd_irq_entry *ie,
 	spin_unlock(&ie->list_lock);
 
 	if (found)
-		complete_desc(found, IDXD_COMPLETE_ABORT);
+		idxd_dma_complete_txd(found, IDXD_COMPLETE_ABORT, false,
+				      NULL, NULL);
 
 	/*
-	 * complete_desc() will return desc to allocator and the desc can be
-	 * acquired by a different process and the desc->list can be modified.
-	 * Delete desc from list so the list trasversing does not get corrupted
-	 * by the other process.
+	 * completing the descriptor will return desc to allocator and
+	 * the desc can be acquired by a different process and the
+	 * desc->list can be modified.  Delete desc from list so the
+	 * list trasversing does not get corrupted by the other process.
 	 */
 	list_for_each_entry_safe(d, t, &flist, list) {
 		list_del_init(&d->list);
-		complete_desc(d, IDXD_COMPLETE_NORMAL);
+		idxd_dma_complete_txd(found, IDXD_COMPLETE_ABORT, true,
+				      NULL, NULL);
 	}
 }
 
@@ -176,20 +171,30 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 {
 	struct idxd_device *idxd = wq->idxd;
 	struct idxd_irq_entry *ie = NULL;
+	u32 desc_flags = desc->hw->flags;
 	void __iomem *portal;
 	int rc;
 
-	if (idxd->state != IDXD_DEV_ENABLED) {
-		idxd_free_desc(wq, desc);
+	if (idxd->state != IDXD_DEV_ENABLED)
 		return -EIO;
-	}
 
 	if (!percpu_ref_tryget_live(&wq->wq_active)) {
-		idxd_free_desc(wq, desc);
-		return -ENXIO;
+		wait_for_completion(&wq->wq_resurrect);
+		if (!percpu_ref_tryget_live(&wq->wq_active))
+			return -ENXIO;
 	}
 
 	portal = idxd_wq_portal_addr(wq);
+
+	/*
+	 * Pending the descriptor to the lockless list for the irq_entry
+	 * that we designated the descriptor to.
+	 */
+	if (desc_flags & IDXD_OP_FLAG_RCI) {
+		ie = &wq->ie;
+		desc->hw->int_handle = ie->int_handle;
+		llist_add(&desc->llnode, &ie->pending_llist);
+	}
 
 	/*
 	 * The wmb() flushes writes to coherent DMA data before
@@ -197,15 +202,6 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 	 * even on UP because the recipient is a device.
 	 */
 	wmb();
-
-	/*
-	 * Pending the descriptor to the lockless list for the irq_entry
-	 * that we designated the descriptor to.
-	 */
-	if (desc->hw->flags & IDXD_OP_FLAG_RCI) {
-		ie = &idxd->irq_entries[wq->id + 1];
-		llist_add(&desc->llnode, &ie->pending_llist);
-	}
 
 	if (wq_dedicated(wq)) {
 		iosubmit_cmds512(portal, desc->hw, 1);
@@ -216,8 +212,6 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 			/* abort operation frees the descriptor */
 			if (ie)
 				llist_abort_desc(wq, ie, desc);
-			else
-				idxd_free_desc(wq, desc);
 			return rc;
 		}
 	}
@@ -225,3 +219,4 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 	percpu_ref_put(&wq->wq_active);
 	return 0;
 }
+EXPORT_SYMBOL_NS_GPL(idxd_submit_desc, IDXD);
